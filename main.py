@@ -1,8 +1,12 @@
+#!/usr/bin/env python3
 import re
 from datetime import datetime, timedelta
 import typer
 
 app = typer.Typer()
+
+
+file_path = '/home/empty/Projects/schedule/grid.txt'
 
 def format_time(total_minutes):
     hours = total_minutes // 60
@@ -28,8 +32,22 @@ def get_priority_color(text):
     return typer.colors.WHITE
 
 @app.command()
+def edit():
+    """Opens the grid file in the system's default editor."""
+    if not os.path.exists(file_path):
+        typer.secho(f"Error: {file_path} not found.", fg=typer.colors.RED)
+        return
+
+    # Identify OS and pick an editor
+    if platform.system() == "Windows":
+        os.system(f"notepad {file_path}")
+    else:
+        # Default to nano for Linux/Mac/WSL
+        os.system(f"nano {file_path}")
+
+@app.command()
 def run(days: int = typer.Argument(1, help="Number of days to show")):
-    file_path = 'grid.txt'
+
     try:
         with open(file_path, 'r') as f:
             data = f.read()
@@ -38,11 +56,14 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
         return
 
     availability = {"weekday": 270, "weekend": 510}
-    base_date = datetime.strptime(re.search(r'DATE: (\d{4}-\d{2}-\d{2})', data).group(1), '%Y-%m-%d')
+    base_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     habits = re.search(r'HABITS \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
     recurring = re.search(r'RECURRING \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
     tasks = re.search(r'TASKS \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
+
+    filler_match = re.search(r'FILLER \{(.*?)\}', data, re.DOTALL)
+    fillers = filler_match.group(1).strip().split('\n') if filler_match else []
 
     for i in range(days):
         current = base_date + timedelta(days=i)
@@ -51,6 +72,8 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
 
         daily_tasks = []
         total_used = 0
+
+
 
         for h in habits:
             dur = parse_duration_to_min(h)
@@ -79,12 +102,24 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
                     total_used += dur
             except: continue
 
+        if total_used < capacity:
+            remaining = capacity - total_used
+            for f in fillers:
+                if remaining <= 0: break
+                dur = parse_duration_to_min(f)
+                if dur <= remaining:
+                    daily_tasks.append((f, dur, None))
+                    total_used += dur
+                    remaining -= dur
+
         daily_tasks.sort(key=lambda x: x[1])
 
         typer.secho(f"--- {current.strftime('%A, %Y-%m-%d')} (Day {day_num}) ---", fg=typer.colors.CYAN, bold=True)
         for line, dur, comment in daily_tasks:
             color = get_priority_color(line)
-            display_name = line.split(':')[0].strip()
+            raw_name = line.split(':')[0].strip()
+            display_name = raw_name.replace('_', ' ').title()
+
             # Display logic
             task_str = f"- {display_name}: {format_time(dur)}"
             if comment:

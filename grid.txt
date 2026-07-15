@@ -20,6 +20,10 @@ TASKS {
 2026-07-20: MATH_TUTO : 20m : P
 2026-07-23: UML_TUTO : 50m : P
 }
+FILLER {
+Black code formatter : 40m
 }
+}
+
 
 
