@@ -4,11 +4,21 @@ import typer
 
 app = typer.Typer()
 
+def format_time(total_minutes):
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    return f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+
 def parse_duration_to_min(text):
     h = re.search(r'(\d+)h', text)
     m = re.search(r'(\d+)m', text)
-    total = (int(h.group(1)) * 60 if h else 0) + (int(m.group(1)) if m else 0)
-    return total
+    return (int(h.group(1)) * 60 if h else 0) + (int(m.group(1)) if m else 0)
+
+def get_priority_color(text):
+    if "HIGHEST" in text: return typer.colors.MAGENTA
+    if "HIGH" in text: return typer.colors.YELLOW
+    if "LOW" in text: return typer.colors.BRIGHT_BLACK
+    return typer.colors.WHITE
 
 @app.command()
 def run(days: int = typer.Argument(1, help="Number of days to show")):
@@ -21,10 +31,7 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
         return
 
     availability = {"weekday": 270, "weekend": 510}
-
-    # Extract base date once
-    base_date_str = re.search(r'DATE: (\d{4}-\d{2}-\d{2})', data).group(1)
-    base_date = datetime.strptime(base_date_str, '%Y-%m-%d')
+    base_date = datetime.strptime(re.search(r'DATE: (\d{4}-\d{2}-\d{2})', data).group(1), '%Y-%m-%d')
 
     habits = re.search(r'HABITS \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
     recurring = re.search(r'RECURRING \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
@@ -38,17 +45,17 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
         daily_tasks = []
         total_used = 0
 
-        # Collection Logic
+        # Collection Logic (Adding priority string for coloring)
         for h in habits:
             dur = parse_duration_to_min(h)
-            daily_tasks.append((h.split(':')[0].strip(), dur))
+            daily_tasks.append((h, dur)) # Keep full line for priority detection
             total_used += dur
 
         for r in recurring:
             match = re.search(r'\[DAYS: ([\d, ]+)\]', r)
             if match and str(day_num) in [d.strip() for d in match.group(1).split(',')]:
                 dur = parse_duration_to_min(r)
-                daily_tasks.append((r.split(':')[0].strip(), dur))
+                daily_tasks.append((r, dur))
                 total_used += dur
 
         for t in tasks:
@@ -61,14 +68,22 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
                 daily_tasks.append((parts[1], dur))
                 total_used += dur
 
+        daily_tasks.sort(key=lambda x: x[1])
+
         # Output
         typer.secho(f"--- {current.strftime('%A, %Y-%m-%d')} (Day {day_num}) ---", fg=typer.colors.CYAN, bold=True)
-        for task, dur in daily_tasks:
-            typer.echo(f"- {task}: {dur}m")
+        for line, dur in daily_tasks:
+            color = get_priority_color(line)
+            # Clean up task name for display
+            display_name = line.split(':')[0].strip()
+            typer.secho(f"- {display_name}: {format_time(dur)}", fg=color)
 
-        color = typer.colors.GREEN if total_used <= capacity else typer.colors.RED
-        status = "OK" if total_used <= capacity else "OVERLOADED"
-        typer.secho(f"Total: {total_used}m / Capacity: {capacity}m -> {status}", fg=color, bold=True)
+        # Status
+        diff = capacity - total_used
+        status_color = typer.colors.GREEN if diff >= 0 else typer.colors.RED
+        status_text = f"{format_time(abs(diff))} {'FREE' if diff >= 0 else 'OVERLOADED'}"
+
+        typer.secho(f"Total: {format_time(total_used)} / Capacity: {format_time(capacity)} -> {status_text}", fg=status_color, bold=True)
         typer.echo("")
 
 if __name__ == "__main__":
