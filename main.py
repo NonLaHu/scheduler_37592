@@ -10,9 +10,16 @@ def format_time(total_minutes):
     return f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
 
 def parse_duration_to_min(text):
-    h = re.search(r'(\d+)h', text)
-    m = re.search(r'(\d+)m', text)
+    # Remove everything after # before parsing duration
+    clean_text = text.split('#')[0]
+    h = re.search(r'(\d+)h', clean_text)
+    m = re.search(r'(\d+)m', clean_text)
     return (int(h.group(1)) * 60 if h else 0) + (int(m.group(1)) if m else 0)
+
+def get_comment(text):
+    if '#' in text:
+        return text.split('#')[1].strip()
+    return None
 
 def get_priority_color(text):
     if "HIGHEST" in text: return typer.colors.MAGENTA
@@ -45,45 +52,50 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
         daily_tasks = []
         total_used = 0
 
-        # Collection Logic (Adding priority string for coloring)
         for h in habits:
             dur = parse_duration_to_min(h)
-            daily_tasks.append((h, dur)) # Keep full line for priority detection
+            comment = get_comment(h)
+            daily_tasks.append((h, dur, comment))
             total_used += dur
 
         for r in recurring:
             match = re.search(r'\[DAYS: ([\d, ]+)\]', r)
             if match and str(day_num) in [d.strip() for d in match.group(1).split(',')]:
                 dur = parse_duration_to_min(r)
-                daily_tasks.append((r, dur))
+                comment = get_comment(r)
+                daily_tasks.append((r, dur, comment))
                 total_used += dur
 
         for t in tasks:
             parts = [p.strip() for p in t.split(':')]
             if len(parts) < 2: continue
-            t_date = datetime.strptime(parts[0], '%Y-%m-%d')
-            if ": P" in t: t_date -= timedelta(days=1)
-            if t_date.date() == current.date():
-                dur = parse_duration_to_min(parts[2] if len(parts) > 2 else "0m")
-                daily_tasks.append((parts[1], dur))
-                total_used += dur
+            try:
+                t_date = datetime.strptime(parts[0], '%Y-%m-%d')
+                if ": P" in t: t_date -= timedelta(days=1)
+                if t_date.date() == current.date():
+                    dur = parse_duration_to_min(parts[2] if len(parts) > 2 else "0m")
+                    comment = get_comment(t)
+                    daily_tasks.append((parts[1], dur, comment))
+                    total_used += dur
+            except: continue
 
         daily_tasks.sort(key=lambda x: x[1])
 
-        # Output
         typer.secho(f"--- {current.strftime('%A, %Y-%m-%d')} (Day {day_num}) ---", fg=typer.colors.CYAN, bold=True)
-        for line, dur in daily_tasks:
+        for line, dur, comment in daily_tasks:
             color = get_priority_color(line)
-            # Clean up task name for display
             display_name = line.split(':')[0].strip()
-            typer.secho(f"- {display_name}: {format_time(dur)}", fg=color)
+            # Display logic
+            task_str = f"- {display_name}: {format_time(dur)}"
+            if comment:
+                task_str += f" | # {comment}"
+            typer.secho(task_str, fg=color)
 
         # Status
         diff = capacity - total_used
         status_color = typer.colors.GREEN if diff >= 0 else typer.colors.RED
         status_text = f"{format_time(abs(diff))} {'FREE' if diff >= 0 else 'OVERLOADED'}"
-
-        typer.secho(f"Total: {format_time(total_used)} / Capacity: {format_time(capacity)} -> {status_text}", fg=status_color, bold=True)
+        typer.secho(f"\nTotal: {format_time(total_used)} / Capacity: {format_time(capacity)} -> {status_text}", fg=status_color, bold=True)
         typer.echo("")
 
 if __name__ == "__main__":
