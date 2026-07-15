@@ -29,58 +29,71 @@ TASKS {
 """
 
 
-def parse_time(time_str):
-    if not time_str or "0m" in time_str: return 0
-    minutes = 0
-    h_match = re.search(r'(\d+)h', time_str)
-    m_match = re.search(r'(\d+)m', time_str)
-    if h_match: minutes += int(h_match.group(1)) * 60
-    if m_match: minutes += int(m_match.group(1))
-    return minutes
+def parse_duration_to_min(text):
+    """Extracts total minutes from strings like '1h 30m' or '20m'."""
+    h = re.search(r'(\d+)h', text)
+    m = re.search(r'(\d+)m', text)
+    total = (int(h.group(1)) * 60 if h else 0) + (int(m.group(1)) if m else 0)
+    return total
 
 def get_schedule(data, days_to_show=1):
-    # Setup Availability
-    # Weekday (1-5): 19:00-23:30 | Weekend (6-7): 08:00-00:00 & 19:00-23:30
     availability = {
-        "weekday": (19, 23.5),
-        "weekend": [(8, 24), (19, 23.5)]
+        "weekday": (19, 23.5), # 4.5 hours = 270 mins
+        "weekend": [(8, 12), (19, 23.5)] # 4 hours + 4.5 hours = 510 mins
     }
 
-    base_date = datetime.strptime(re.search(r'DATE: (\d{4}-\d{2}-\d{2})', data).group(1), '%Y-%m-%d')
+    # Pre-parse sections
     habits = re.search(r'HABITS \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
     recurring = re.search(r'RECURRING \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
     tasks = re.search(r'TASKS \{(.*?)\}', data, re.DOTALL).group(1).strip().split('\n')
+
+    base_date = datetime.strptime(re.search(r'DATE: (\d{4}-\d{2}-\d{2})', data).group(1), '%Y-%m-%d')
 
     for i in range(days_to_show):
         current = base_date + timedelta(days=i)
         day_num = current.isoweekday()
         is_weekend = day_num >= 6
 
-        # Determine time slots
-        slots = availability["weekend"] if is_weekend else [availability["weekday"]]
-        slot_str = " | ".join([f"{s[0]:02d}:00 to {int(s[1]):02d}:{int((s[1]%1)*60):02d}" for s in slots])
+        # Calculate Capacity in Minutes
+        if is_weekend:
+            total_capacity = ((12-8) * 60) + ((23.5-19) * 60)
+        else:
+            total_capacity = (23.5-19) * 60
 
-        print(f"\n--- {current.strftime('%A, %Y-%m-%d')} (Day {day_num}) ---")
-        print(f"AVAILABLE HOURS: {slot_str}")
+        daily_tasks = []
+        total_used = 0
 
-        print("[HABITS]")
-        for h in habits: print(f"  * {h.strip()}")
+        # 1. Collect Habits
+        for h in habits:
+            dur = parse_duration_to_min(h)
+            daily_tasks.append((h.split(':')[0].strip(), dur))
+            total_used += dur
 
-        print("[RECURRING]")
+        # 2. Collect Recurring
         for r in recurring:
             days_match = re.search(r'\[DAYS: ([\d, ]+)\]', r)
             if days_match and str(day_num) in [d.strip() for d in days_match.group(1).split(',')]:
-                print(f"  * {r.split(':')[0].strip()}")
+                dur = parse_duration_to_min(r)
+                daily_tasks.append((r.split(':')[0].strip(), dur))
+                total_used += dur
 
-        print("[TASKS]")
+        # 3. Collect Tasks
         for t in tasks:
-            parts = t.split(':')
-            t_date = datetime.strptime(parts[0].strip(), '%Y-%m-%d')
-            is_prep = ": P" in t
-            if is_prep: t_date -= timedelta(days=1)
+            parts = [p.strip() for p in t.split(':')]
+            t_date = datetime.strptime(parts[0], '%Y-%m-%d')
+            if ": P" in t: t_date -= timedelta(days=1)
 
             if t_date.date() == current.date():
-                print(f"  * {parts[1].strip()}")
+                dur = parse_duration_to_min(parts[2] if len(parts) > 2 else "0m")
+                daily_tasks.append((parts[1], dur))
+                total_used += dur
 
-# Usage
+        # Output
+        print(f"--- {current.strftime('%A, %Y-%m-%d')} (Day {day_num}) ---")
+        for task, dur in daily_tasks:
+            print(f"- {task}: {dur}m")
+
+        status = "OK" if total_used <= total_capacity else "OVERLOADED"
+        print(f"Total: {total_used}m / Capacity: {int(total_capacity)}m -> {status}\n")
+
 get_schedule(grid_data, days_to_show=7)
