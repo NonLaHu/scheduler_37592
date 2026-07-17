@@ -94,7 +94,7 @@ def run(days: int = typer.Argument(1, help="Number of days to show")):
             if len(parts) < 2: continue
             try:
                 t_date = datetime.strptime(parts[0], '%Y-%m-%d')
-                if ": P" in t: t_date -= timedelta(days=1)
+                # if ": P" in t: t_date -= timedelta(days=1)
                 if t_date.date() == current.date():
                     dur = parse_duration_to_min(parts[2] if len(parts) > 2 else "0m")
                     comment = get_comment(t)
